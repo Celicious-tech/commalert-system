@@ -1,0 +1,26 @@
+import { db } from "@/lib/firebase";
+import { doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { NextResponse } from "next/server";
+
+export async function PATCH(req, { params }) {
+  try {
+    const { id } = params;
+    const { status } = await req.json();
+    await updateDoc(doc(db, "feedback", id), { 
+      status: status || "RESOLVED", 
+      updatedAt: new Date() 
+    });
+    return NextResponse.json({ message: "Status updated!" });
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req, { params }) {
+  try {
+    await deleteDoc(doc(db, "feedback", params.id));
+    return NextResponse.json({ message: "Report deleted!" });
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
