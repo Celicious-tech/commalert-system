@@ -25,7 +25,7 @@ export default function CommAlertSystem() {
 
   const [editingId, setEditingId] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
-  const fileInputRef = useRef(null); // Gi-fix ang variable declaration error diri
+  const fileInputRef = useRef(null); 
 
   const [selectedReport, setSelectedReport] = useState(null);
   const [adminEditingReport, setAdminEditingReport] = useState(null);
@@ -33,14 +33,26 @@ export default function CommAlertSystem() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedBulkIds, setSelectedBulkIds] = useState([]);
 
+  // --- UNIQUE DEVICE IDENTITY STATE ---
+  const [myDeviceId, setMyDeviceId] = useState("");
+
   // --- NOTIFICATIONS STATES ---
   const [notifications, setNotifications] = useState([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const notifDropdownRef = useRef(null);
 
-  // --- 1. REAL-TIME DATA SYNC ---
+  // --- 1. INITIALIZE DEVICE ID & REAL-TIME DATA SYNC ---
   useEffect(() => {
-    // Kinahanglan magpabiling mag-sync gihapon bisan pa sa Citizen view aron makita ang "My Submissions"
+    // Paghimo o pagkuha sa Unique Device ID para sa privacy filter sa Citizen side
+    if (typeof window !== "undefined") {
+      let dId = localStorage.getItem("commalert_device_id");
+      if (!dId) {
+        dId = "dev_" + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+        localStorage.setItem("commalert_device_id", dId);
+      }
+      setMyDeviceId(dId);
+    }
+
     const q = query(collection(db, "feedback"), orderBy("createdAt", "desc"));
     
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
@@ -80,7 +92,7 @@ export default function CommAlertSystem() {
     };
   }, []);
 
-  // --- GLOBAL SYNC ARCHIVE & ACTIVE FILTER LOGIC ---
+  // --- GLOBAL SYNC ARCHIVE & ACTIVE FILTER LOGIC FOR ADMIN ---
   const filteredReports = useMemo(() => {
     const baseList = reports.filter(r => showArchives ? r.status === "Archived" : r.status !== "Archived");
     
@@ -91,10 +103,28 @@ export default function CommAlertSystem() {
     );
   }, [reports, searchTerm, showArchives]);
 
+  // Filter para sa Citizen "My Submissions" aron iyang kaugalingong reports ra ang makita
+  const myCitizenSubmissions = useMemo(() => {
+    return reports.filter(r => r.deviceId === myDeviceId && r.status !== "Archived");
+  }, [reports, myDeviceId]);
+
   // Kalkulasyon para sa Archive Counter sa Navbar Button
   const archiveCount = useMemo(() => {
     return reports.filter(r => r.status === "Archived").length;
   }, [reports]);
+
+  // --- SEKSYON PARA SA PAGGRUPO SA REPORTS BASE SA ILANG STATUS (ADMIN DASHBOARD CATEGORIES) ---
+  const pendingReports = useMemo(() => {
+    return filteredReports.filter(r => r.status === "Pending" || !r.status);
+  }, [filteredReports]);
+
+  const approvedReports = useMemo(() => {
+    return filteredReports.filter(r => r.status === "Approved" || r.status === "In Progress");
+  }, [filteredReports]);
+
+  const resolvedReports = useMemo(() => {
+    return filteredReports.filter(r => r.status === "Resolved" || r.status === "Completed");
+  }, [filteredReports]);
 
   const toggleBulkSelection = (id) => {
     setSelectedBulkIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
@@ -123,6 +153,7 @@ export default function CommAlertSystem() {
 
   const finalizeSubmission = async (location) => {
     const reportData = {
+      deviceId: myDeviceId, // Gi-tag ang Unique ID sa device nga nag-submit
       category: feedback.category,
       message: feedback.message,
       priority: feedback.priority,
@@ -203,8 +234,18 @@ export default function CommAlertSystem() {
     setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
-  // --- REUSABLE ROW RENDERER FOR ADMIN PANEL ---
-  const renderRows = (dataList) => {
+  // --- REUSABLE ROW RENDERER FOR ADMIN PANELS ---
+  const renderRows = (dataList, emptyMessage = "No reports found.") => {
+    if (dataList.length === 0) {
+      return (
+        <tr>
+          <td colSpan="6" className="p-12 text-center text-slate-500 text-xs italic bg-[#0f172a]/20">
+            {emptyMessage}
+          </td>
+        </tr>
+      );
+    }
+
     return dataList.map((report) => (
       <tr key={report.id} className="hover:bg-blue-500/5 transition-colors group border-b border-slate-800/40">
         <td className="p-8">
@@ -387,7 +428,7 @@ export default function CommAlertSystem() {
           <div className="max-w-4xl mx-auto space-y-12">
             <div className="text-center">
               <h2 className="text-4xl md:text-5xl font-black text-white mb-2 uppercase tracking-tighter">Hello, <span className="text-blue-500">Citizen!</span></h2>
-              <p className="text-slate-400 text-sm font-medium">Your reports are synced to the cloud globally.</p>
+              <p className="text-slate-400 text-sm font-medium">Your reports are secure and private to your device.</p>
             </div>
 
             <div className="max-w-xl mx-auto bg-[#1e293b]/50 border border-slate-800 p-6 md:p-10 rounded-[2.5rem] shadow-2xl backdrop-blur-sm">
@@ -419,11 +460,11 @@ export default function CommAlertSystem() {
                     <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" className="hidden" />
                   </div>
                 </div>
-                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white py-5 rounded-xl font-bold uppercase tracking-widest transition-all shadow-lg">{editingId ? "Update Report" : "Send Feedback"}</button>
+                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white py-5 rounded-xl font-bold uppercase tracking-widest tracking-wider shadow-lg">{editingId ? "Update Report" : "Send Feedback"}</button>
               </form>
             </div>
 
-            {/* --- ADDED: CITIZEN "MY SUBMISSIONS" LAMESA NABASE SA SCREENSHOT --- */}
+            {/* --- CITIZEN "MY SUBMISSIONS" LAMESA (NOW PRIVACY-FILTERED) --- */}
             <div className="bg-[#1e293b]/20 border border-slate-800/60 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md overflow-x-auto mt-12 text-left">
               <div className="p-6 bg-[#1e293b]/40 border-b border-slate-800">
                 <h3 className="text-xl font-bold text-white tracking-tight">My Submissions</h3>
@@ -438,8 +479,8 @@ export default function CommAlertSystem() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/40">
-                  {reports.filter(r => r.status !== "Archived").length > 0 ? (
-                    reports.filter(r => r.status !== "Archived").map((report) => (
+                  {myCitizenSubmissions.length > 0 ? (
+                    myCitizenSubmissions.map((report) => (
                       <tr key={report.id} className="hover:bg-blue-500/5 transition-colors group">
                         <td className="p-6 text-slate-500 font-mono text-xs font-bold">... {report.id.slice(-6)}</td>
                         <td className="p-6 text-slate-300 italic text-sm">
@@ -468,7 +509,7 @@ export default function CommAlertSystem() {
             </div>
 
           </div>
-        )}
+         )}
 
         {/* VIEW: ADMIN PANEL */}
         {view === "admin" && (
@@ -517,8 +558,8 @@ export default function CommAlertSystem() {
                   </div>
                 </div>
 
-                {/* TABLE DOCK FOR ADMIN PANEL */}
-                <div className="bg-[#1e293b]/20 border border-slate-800/60 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md overflow-x-auto mt-12">
+                {/* --- SEGMENTED TABLE CONTAINER PARA SA ADMIN SECTIONS (ADMIN SEES ABSOLUTELY EVERYTHING) --- */}
+                <div className="bg-[#1e293b]/10 border border-slate-800/60 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md overflow-x-auto mt-12">
                   <table className="w-full text-left min-w-[800px]">
                     <thead className="bg-[#0f172a]/80 text-slate-500 text-[10px] font-black uppercase tracking-[0.15em] border-b border-slate-800">
                       <tr>
@@ -535,50 +576,50 @@ export default function CommAlertSystem() {
                         <th className="p-8 text-center">Actions</th>
                       </tr>
                     </thead>
-                    
-                    <tbody className="divide-y divide-slate-800/40">
-                      {/* --- SECTION 1: PENDING REPORTS --- */}
-                      <tr className="bg-amber-500/5">
-                        <td colSpan="6" className="p-4 px-8 text-amber-500 font-black text-xs uppercase tracking-wider border-b border-slate-800/60">
-                          Pending Reports ({filteredReports.filter(r => r.status === "Pending" || !r.status).length})
-                        </td>
-                      </tr>
-                      {filteredReports.filter(r => r.status === "Pending" || !r.status).length > 0 ? (
-                        renderRows(filteredReports.filter(r => r.status === "Pending" || !r.status))
-                      ) : (
-                        <tr>
-                          <td colSpan="6" className="p-12 text-center text-slate-500 text-xs italic">No pending reports.</td>
-                        </tr>
-                      )}
 
-                      {/* --- SECTION 2: IN PROGRESS / APPROVED --- */}
-                      <tr className="bg-emerald-500/5">
-                        <td colSpan="6" className="p-4 px-8 text-emerald-400 font-black text-xs uppercase tracking-wider border-b border-slate-800/60 border-t border-slate-800/60">
-                          In Progress / Approved ({filteredReports.filter(r => r.status === "Approved").length})
-                        </td>
-                      </tr>
-                      {filteredReports.filter(r => r.status === "Approved").length > 0 ? (
-                        renderRows(filteredReports.filter(r => r.status === "Approved"))
-                      ) : (
-                        <tr>
-                          <td colSpan="6" className="p-12 text-center text-slate-500 text-xs italic">No approved reports.</td>
-                        </tr>
-                      )}
+                    {showArchives ? (
+                      <tbody className="divide-y divide-slate-800/40">
+                        {renderRows(filteredReports, "No archived reports found.")}
+                      </tbody>
+                    ) : (
+                      <>
+                        {/* SECTION 1: PENDING REPORTS */}
+                        <thead className="bg-amber-500/5 text-amber-500 border-t border-b border-slate-800/60">
+                          <tr>
+                            <td colSpan="6" className="px-8 py-3 text-[11px] font-black tracking-wider uppercase">
+                              Pending Reports ({pendingReports.length})
+                            </td>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/40 bg-[#0f172a]/10">
+                          {renderRows(pendingReports, "No pending reports.")}
+                        </tbody>
 
-                      {/* --- SECTION 3: RESOLVED / COMPLETED --- */}
-                      <tr className="bg-blue-500/5">
-                        <td colSpan="6" className="p-4 px-8 text-blue-400 font-black text-xs uppercase tracking-wider border-b border-slate-800/60 border-t border-slate-800/60">
-                          Resolved / Completed ({filteredReports.filter(r => r.status === "Resolved").length})
-                        </td>
-                      </tr>
-                      {filteredReports.filter(r => r.status === "Resolved").length > 0 ? (
-                        renderRows(filteredReports.filter(r => r.status === "Resolved"))
-                      ) : (
-                        <tr>
-                          <td colSpan="6" className="p-12 text-center text-slate-500 text-xs italic">No resolved reports.</td>
-                        </tr>
-                      )}
-                    </tbody>
+                        {/* SECTION 2: IN PROGRESS / APPROVED */}
+                        <thead className="bg-emerald-500/5 text-emerald-400 border-t border-b border-slate-800/60">
+                          <tr>
+                            <td colSpan="6" className="px-8 py-3 text-[11px] font-black tracking-wider uppercase">
+                              In Progress / Approved ({approvedReports.length})
+                            </td>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/40 bg-[#0f172a]/10">
+                          {renderRows(approvedReports, "No approved reports.")}
+                        </tbody>
+
+                        {/* SECTION 3: RESOLVED / COMPLETED */}
+                        <thead className="bg-blue-500/5 text-blue-400 border-t border-b border-slate-800/60">
+                          <tr>
+                            <td colSpan="6" className="px-8 py-3 text-[11px] font-black tracking-wider uppercase">
+                              Resolved / Completed ({resolvedReports.length})
+                            </td>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/40 bg-[#0f172a]/10">
+                          {renderRows(resolvedReports, "No resolved reports.")}
+                        </tbody>
+                      </>
+                    )}
                   </table>
                 </div>
               </div>
