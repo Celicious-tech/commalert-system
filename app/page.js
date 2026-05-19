@@ -85,17 +85,31 @@ export default function CommAlertSystem() {
     };
   }, [isAdminLoggedIn]);
 
-  // --- GLOBAL SYNC ARCHIVE & ACTIVE FILTER LOGIC ---
-  const filteredReports = useMemo(() => {
-    // I-segregate ang active reports ug archived reports gikan sa Firebase database directly
-    const baseList = reports.filter(r => showArchives ? r.status === "Archived" : r.status !== "Archived");
-    
-    return baseList.filter(r => 
+  // --- GLOBAL SYNC FILTER LOGIC BASED ON SEARCH ONLY ---
+  const searchedReports = useMemo(() => {
+    return reports.filter(r => 
       (r.message || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
       r.id.toString().toLowerCase().includes(searchTerm.toLowerCase()) ||
       (r.category || "").toLowerCase().includes(searchTerm.toLowerCase())
     );
-  }, [reports, searchTerm, showArchives]);
+  }, [reports, searchTerm]);
+
+  // --- SEGREGATED MEMOS FOR THE 3-COLUMN / 3-TABLE LAYOUT ---
+  const pendingReports = useMemo(() => {
+    return searchedReports.filter(r => r.status === "Pending" || !r.status);
+  }, [searchedReports]);
+
+  const inProgressReports = useMemo(() => {
+    return searchedReports.filter(r => r.status === "Approved");
+  }, [searchedReports]);
+
+  const resolvedReports = useMemo(() => {
+    return searchedReports.filter(r => r.status === "Resolved");
+  }, [searchedReports]);
+
+  const archivedReports = useMemo(() => {
+    return searchedReports.filter(r => r.status === "Archived");
+  }, [searchedReports]);
 
   const toggleBulkSelection = (id) => {
     setSelectedBulkIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
@@ -177,12 +191,10 @@ export default function CommAlertSystem() {
     }
   };
 
-  // --- GLOBAL ARCHIVE ACTION (Mo-sync sa laptop ug phone) ---
   const handleArchive = async (id) => {
     if (confirm("Move this report to Archives?")) {
         try {
             const reportRef = doc(db, "feedback", id);
-            // Pabalhinon lang ang status ngadto sa Archived sa database para makita gihapon sa laing device
             await updateDoc(reportRef, { status: "Archived" });
             alert("Report successfully moved to Cloud Archives!");
         } catch (error) {
@@ -206,40 +218,57 @@ export default function CommAlertSystem() {
     setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
-  // --- REUSABLE ROW RENDERER ---
-  const renderRows = (dataList) => {
-    return dataList.map((report) => (
-      <tr key={report.id} className="hover:bg-blue-500/5 transition-colors group border-b border-slate-800/40">
-        <td className="p-8">
-          <input type="checkbox" checked={selectedBulkIds.includes(report.id)} onChange={() => toggleBulkSelection(report.id)} />
-        </td>
-        <td className="p-8 text-slate-500 font-mono text-[10px] font-bold">... {report.id.slice(-6)}</td>
-        <td className="p-8 text-left">
-          <div className="font-bold text-white uppercase tracking-tight text-sm">{report.category}</div>
-          <div className={`text-[10px] font-bold ${report.priority === 'Emergency' ? 'text-red-500' : 'text-slate-500'}`}>{report.priority || 'Medium'}</div>
-        </td>
-        <td className="p-8 text-slate-400 italic text-sm text-left">
-          <div className="flex items-center gap-3">
-            {report.image && <div className="w-8 h-8 rounded bg-slate-800 overflow-hidden border border-slate-700 flex-shrink-0"><img src={report.image} alt="Report" className="w-full h-full object-cover" /></div>}
-            <span className="truncate max-w-[250px]">"{report.message}"</span>
-          </div>
-        </td>
-        <td className="p-8 text-center">
-          <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase border ${report.status === "Archived" ? "bg-amber-500/10 text-amber-500 border-amber-500/20" : "bg-blue-500/10 text-blue-400 border-blue-500/20"}`}>
-            {report.status || "Pending"}
-          </span>
-        </td>
-        <td className="p-8 text-center">
-          <div className="flex justify-center gap-4">
-            <button onClick={() => setSelectedReport(report)} className="text-blue-400 hover:underline text-[10px] font-bold uppercase tracking-wider">Details</button>
-            {!showArchives && <button onClick={() => setAdminEditingReport(report)} className="bg-blue-600/10 text-blue-400 border border-blue-500/20 px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 hover:text-white transition-all tracking-wider">Update</button>}
-            <button onClick={() => showArchives ? handlePermanentDelete(report.id) : handleArchive(report.id)} className="text-red-500/50 hover:text-red-500 transition-colors">
-               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-            </button>
-          </div>
-        </td>
-      </tr>
-    ));
+  // --- REUSABLE TABLES / COLUMNS GENERATOR ---
+  const renderTableSection = (title, dataList, themeColor, isArchiveSection = false) => {
+    return (
+      <div className="bg-[#1e293b]/20 border border-slate-800/60 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md p-6 space-y-4">
+        <div className="flex justify-between items-center px-2">
+          <h3 className={`text-sm font-black uppercase tracking-wider ${themeColor}`}>{title}</h3>
+          <span className="text-xs bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 font-bold font-mono">{dataList.length}</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left min-w-[500px]">
+            <thead className="bg-[#0f172a]/80 text-slate-500 text-[10px] font-black uppercase tracking-[0.15em] border-b border-slate-800">
+              <tr>
+                <th className="p-4 w-8">ID</th>
+                <th className="p-4">Type</th>
+                <th className="p-4">Message</th>
+                <th className="p-4 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/40">
+              {dataList.length > 0 ? (
+                dataList.map((report) => (
+                  <tr key={report.id} className="hover:bg-blue-500/5 transition-colors border-b border-slate-800/40 text-xs">
+                    <td className="p-4 text-slate-500 font-mono font-bold">...{report.id.slice(-4)}</td>
+                    <td className="p-4">
+                      <div className="font-bold text-white uppercase">{report.category}</div>
+                      <div className={`text-[10px] font-bold ${report.priority === 'Emergency' ? 'text-red-500' : 'text-slate-500'}`}>{report.priority || 'Medium'}</div>
+                    </td>
+                    <td className="p-4 text-slate-400 italic max-w-[180px] truncate">
+                      "{report.message}"
+                    </td>
+                    <td className="p-4 text-center">
+                      <div className="flex justify-center gap-3">
+                        <button onClick={() => setSelectedReport(report)} className="text-blue-400 hover:underline text-[10px] font-bold uppercase">Details</button>
+                        {!isArchiveSection && <button onClick={() => setAdminEditingReport(report)} className="text-emerald-400 hover:underline text-[10px] font-bold uppercase">Update</button>}
+                        <button onClick={() => isArchiveSection ? handlePermanentDelete(report.id) : handleArchive(report.id)} className="text-red-500/60 hover:text-red-500 transition-colors">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="4" className="p-8 text-center text-slate-600 italic text-xs">No reports listed.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -368,8 +397,8 @@ export default function CommAlertSystem() {
                             </div>
                           </div>
                         </div>
-                      )
-                    ))}
+                      ))
+                    )}
                   </div>
                 </div>
               )}
@@ -385,7 +414,6 @@ export default function CommAlertSystem() {
 
       {/* CONTENT AREA */}
       <div className="p-4 md:p-8">
-        {/* VIEW: CITIZEN */}
         {view === "citizen" && (
           <div className="max-w-4xl mx-auto space-y-12">
             <div className="text-center">
@@ -430,7 +458,7 @@ export default function CommAlertSystem() {
 
         {/* VIEW: ADMIN PANEL */}
         {view === "admin" && (
-          <div className="max-w-6xl mx-auto">
+          <div className="max-w-7xl mx-auto">
             {!isAdminLoggedIn ? (
               <div className="flex justify-center items-center py-10 md:py-20">
                 <div className="bg-[#1e293b]/40 border border-slate-800 w-full max-w-md rounded-[3rem] p-8 md:p-12 shadow-2xl backdrop-blur-xl">
@@ -446,11 +474,11 @@ export default function CommAlertSystem() {
               <div className="space-y-6">
                 <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 text-left relative">
                   <div>
-                    <h2 className="text-5xl font-black text-white tracking-tighter uppercase mb-1">Hello, <span className="text-blue-500">Admin!</span></h2>
+                    <h2 className="text-4xl font-black text-white tracking-tighter uppercase mb-1">Hello, <span className="text-blue-500">Admin!</span></h2>
                     <p className="text-slate-400 text-sm font-medium">Monitoring system reports in real-time.</p>
                   </div>
                   
-                  {/* SEARCH, TOGGLE ARCHIVE & LOGOUT HUB */}
+                  {/* SEARCH, TOGGLE ARCHIVE & LOGOUT */}
                   <div className="flex items-center gap-4 flex-wrap mt-4 md:mt-0">
                     <input 
                       type="text" 
@@ -459,12 +487,11 @@ export default function CommAlertSystem() {
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="bg-[#0f172a] border border-slate-800 text-slate-300 px-6 py-2 rounded-full text-xs font-semibold outline-none focus:border-blue-500 w-44"
                     />
-                    {/* BUTTON ARON MO-LOGBA ANG INTERFACE GIKAN SA CLOUD DATABASE (Laptop/Phone synchronized) */}
                     <button 
                       onClick={() => setShowArchives(!showArchives)} 
                       className={`text-xs font-bold uppercase px-6 py-2 rounded-xl transition-all border ${showArchives ? 'bg-amber-500 text-white border-amber-500' : 'border-amber-500/20 bg-amber-500/5 text-amber-500'}`}
                     >
-                      {showArchives ? "View Active" : "Archives"}
+                      {showArchives ? "Back to Dashboard" : "View Archives"}
                     </button>
                     <button 
                       onClick={() => setIsAdminLoggedIn(false)} 
@@ -475,35 +502,20 @@ export default function CommAlertSystem() {
                   </div>
                 </div>
 
-                {/* TABLE DOCK */}
-                <div className="bg-[#1e293b]/20 border border-slate-800/60 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-md overflow-x-auto mt-12">
-                  <table className="w-full text-left min-w-[800px]">
-                    <thead className="bg-[#0f172a]/80 text-slate-500 text-[10px] font-black uppercase tracking-[0.15em] border-b border-slate-800">
-                      <tr>
-                        <th className="p-8 w-10"><input type="checkbox" onChange={(e) => {
-                          if (e.target.checked) setSelectedBulkIds(filteredReports.map(r => r.id));
-                          else setSelectedBulkIds([]);
-                        }} /></th>
-                        <th className="p-8">ID</th>
-                        <th className="p-8">Category / Priority</th>
-                        <th className="p-8">Message</th>
-                        <th className="p-8 text-center">Status</th>
-                        <th className="p-8 text-center">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/40">
-                      {filteredReports.length > 0 ? (
-                        renderRows(filteredReports)
-                      ) : (
-                        <tr>
-                          <td colSpan="6" className="p-16 text-center text-slate-500 text-xs italic">
-                            {showArchives ? "No archived reports found in cloud database." : "No active live reports found in global database."}
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                {/* DYNAMIC LAYOUT SWITCHER */}
+                {showArchives ? (
+                  /* ARCHIVE HUB VIEW */
+                  <div className="mt-12">
+                    {renderTableSection("Archived Reports", archivedReports, "text-amber-500", true)}
+                  </div>
+                ) : (
+                  /* THE 3-COLUMN SECTIONS (Based on your picture) */
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-12 text-left">
+                    {renderTableSection("Pending Reports", pendingReports, "text-blue-400")}
+                    {renderTableSection("In Progress / Approved", inProgressReports, "text-amber-400")}
+                    {renderTableSection("Resolved / Completed", resolvedReports, "text-emerald-400")}
+                  </div>
+                )}
               </div>
             )}
           </div>
